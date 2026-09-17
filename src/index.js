@@ -19,6 +19,7 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 const pairingRequests = new Map();
 let reconnectTimer;
+let starting = false;
 let sock;
 let currentQr;
 let qrUpdatedAt;
@@ -30,10 +31,38 @@ app.get('/health', (_request, response) => {
   response.json({ ok: true, connected: Boolean(sock?.user), qrAvailable: Boolean(currentQr), name: config.name });
 });
 
+app.get('/api/status', (_request, response) => {
+  response.json({
+    connected: Boolean(sock?.user),
+    qrAvailable: Boolean(currentQr),
+    name: config.name,
+    started: Boolean(sock),
+    updatedAt: qrUpdatedAt
+  });
+});
+
 app.get('/api/qr', (_request, response) => {
   if (sock?.user) return response.json({ connected: true, qr: null });
   if (!currentQr) return response.status(404).json({ connected: false, qr: null, error: 'QR code is not ready yet.' });
   response.json({ connected: false, qr: currentQr, updatedAt: qrUpdatedAt });
+});
+
+app.post('/api/reconnect', async (_request, response) => {
+  if (starting) {
+    return response.status(202).json({ message: 'A reconnect is already in progress.' });
+  }
+
+  if (sock?.user) {
+    return response.json({ connected: true, message: 'WhatsApp is already connected.' });
+  }
+
+  try {
+    await startBot();
+    return response.json({ ok: true, message: 'WhatsApp reconnect started.' });
+  } catch (error) {
+    logger.error({ err: error }, 'Reconnect request failed');
+    return response.status(500).json({ error: 'Unable to reconnect WhatsApp right now.' });
+  }
 });
 
 app.post('/api/pair', async (request, response) => {
@@ -64,65 +93,72 @@ app.post('/api/pair', async (request, response) => {
 });
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState('.auth_info_baileys');
-  const { version } = await fetchLatestBaileysVersion();
+  if (starting) return;
+  starting = true;
 
-  sock = makeWASocket({
-    version,
-    auth: state,
-    browser: Browsers.ubuntu(config.name),
-    logger,
-    printQRInTerminal: false,
-    markOnlineOnConnect: false,
-    generateHighQualityLinkPreview: false
-  });
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState('.auth_info_baileys');
+    const { version } = await fetchLatestBaileysVersion();
 
-  sock.ev.on('creds.update', saveCreds);
+    sock = makeWASocket({
+      version,
+      auth: state,
+      browser: Browsers.ubuntu(config.name),
+      logger,
+      printQRInTerminal: false,
+      markOnlineOnConnect: false,
+      generateHighQualityLinkPreview: false
+    });
 
-  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-    if (qr) {
-      currentQr = await QRCode.toDataURL(qr, { margin: 2, width: 320 });
-      qrUpdatedAt = Date.now();
-      console.log('\nScan this QR code in WhatsApp → Settings → Linked devices:\n');
-      terminalQr.generate(qr, { small: true });
-    }
+    sock.ev.on('creds.update', saveCreds);
 
-    if (connection === 'open') {
-      currentQr = undefined;
-      qrUpdatedAt = undefined;
-      logger.info(`${config.name} is connected`);
-    }
-
-    if (connection === 'close') {
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      sock = undefined;
-
-      if (shouldReconnect) {
-        logger.warn({ statusCode }, 'Connection closed; reconnecting');
-        clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(startBot, 5000);
-      } else {
-        currentQr = undefined;
-        logger.error('WhatsApp session was logged out. Delete .auth_info_baileys and pair again.');
+    sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+      if (qr) {
+        currentQr = await QRCode.toDataURL(qr, { margin: 2, width: 320 });
+        qrUpdatedAt = Date.now();
+        console.log('\nScan this QR code in WhatsApp → Settings → Linked devices:\n');
+        terminalQr.generate(qr, { small: true });
       }
-    }
-  });
 
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
+      if (connection === 'open') {
+        currentQr = undefined;
+        qrUpdatedAt = undefined;
+        logger.info(`${config.name} is connected`);
+      }
 
-    for (const message of messages) {
-      if (!message.message || message.key.fromMe) continue;
-      const remoteJid = message.key.remoteJid;
-      if (!remoteJid || remoteJid === 'status@broadcast') continue;
+      if (connection === 'close') {
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        sock = undefined;
 
-      const text = getMessageText(message);
-      if (!text || !isCommand(text)) continue;
-      const reply = handleCommand(text);
-      if (reply) await sock.sendMessage(remoteJid, { text: reply }, { quoted: message });
-    }
-  });
+        if (shouldReconnect) {
+          logger.warn({ statusCode }, 'Connection closed; reconnecting');
+          clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(startBot, 5000);
+        } else {
+          currentQr = undefined;
+          logger.error('WhatsApp session was logged out. Delete .auth_info_baileys and pair again.');
+        }
+      }
+    });
+
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      if (type !== 'notify') return;
+
+      for (const message of messages) {
+        if (!message.message || message.key.fromMe) continue;
+        const remoteJid = message.key.remoteJid;
+        if (!remoteJid || remoteJid === 'status@broadcast') continue;
+
+        const text = getMessageText(message);
+        if (!text || !isCommand(text)) continue;
+        const reply = handleCommand(text);
+        if (reply) await sock.sendMessage(remoteJid, { text: reply }, { quoted: message });
+      }
+    });
+  } finally {
+    starting = false;
+  }
 }
 
 function getMessageText(message) {
