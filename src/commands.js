@@ -4,7 +4,7 @@ const config = {
   owner: process.env.OWNER_NAME || 'ADEZ MD Team'
 };
 
-const menu = [
+const commandText = [
   `*${config.name}*`,
   '',
   '*Available commands:*',
@@ -12,25 +12,27 @@ const menu = [
   `${config.prefix}ping - Check bot status`,
   `${config.prefix}menu - Show the ADEZ MD menu`,
   `${config.prefix}about - About this bot`,
+  `${config.prefix}status - Check connection status`,
   '',
   '_More services will be added soon._'
 ].join('\n');
 
 function normalizeCommand(text) {
-  const input = text.trim();
-  const withoutPrefix = input.startsWith(config.prefix)
-    ? input.slice(config.prefix.length)
-    : input.startsWith('/') || input.startsWith('!')
-      ? input.slice(1)
-      : input;
+  const input = String(text || '').trim();
+  const cleaned = input
+    .replace(new RegExp(`^${config.prefix}`, 'i'), '')
+    .replace(/^[/!]+/, '')
+    .replace(new RegExp(`${config.name}`, 'gi'), '')
+    .trim();
 
-  const [command, ...args] = withoutPrefix.trim().split(/\s+/);
+  const [command, ...args] = cleaned.split(/\s+/);
   return { command: (command || '').toLowerCase(), args };
 }
 
 function isCommand(text) {
-  const value = text.trim();
-  return value.startsWith(config.prefix) || value.startsWith('/') || value.startsWith('!') || /^(help|ping|menu|about)$/i.test(value);
+  const value = String(text || '').trim();
+  const lower = value.toLowerCase();
+  return value.startsWith(config.prefix) || value.startsWith('/') || value.startsWith('!') || /^(help|ping|menu|about|status|commands|hello|hi|start)$/i.test(lower) || lower.includes(config.name.toLowerCase());
 }
 
 function handleCommand(text) {
@@ -38,20 +40,26 @@ function handleCommand(text) {
 
   switch (command) {
     case 'help':
-      return menu;
+    case 'commands':
+      return commandText;
     case 'ping':
-      return '🏓 Pong! ADEZ MD bot is online.';
+    case 'status':
+      return '✅ ADEZ MD is connected and ready.\nUse /help to see available commands.';
     case 'menu':
+    case 'services':
       return [
         `*${config.name} menu*`,
         '',
         '🩺 Medical information and support',
         '📅 Appointment enquiries',
         '📍 Clinic information',
+        '💬 WhatsApp bot support',
         '',
         'Reply with *help* to see bot commands.'
       ].join('\n');
     case 'about':
+    case 'info':
+    case 'whois':
       return [
         `*${config.name} WhatsApp bot*`,
         `Managed by: ${config.owner}`,
@@ -59,6 +67,11 @@ function handleCommand(text) {
         '',
         'This bot provides general information only. It does not replace a qualified clinician or emergency services.'
       ].join('\n');
+    case 'hello':
+    case 'hi':
+      return `Hello! I am ${config.name}. Use *${config.prefix}help* to see the available commands.`;
+    case 'start':
+      return `✅ ${config.name} is online and ready to assist.`;
     default:
       return null;
   }

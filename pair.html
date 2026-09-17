@@ -22,7 +22,7 @@
 <body>
   <main><section class="card" aria-labelledby="title">
     <div class="logo" aria-hidden="true">AD</div><h1 id="title">Pair ADEZ MD</h1><p class="intro">Scan the QR code or use a pairing code to connect WhatsApp.</p>
-    <div id="warning" class="warning" role="alert">WhatsApp is disconnected. Reconnect and scan again.</div>
+    <div id="warning" class="warning" role="alert">⚠️ WhatsApp is disconnected. Start the link to reconnect and continue.</div>
     <div id="qr-panel" class="qr-panel"><p id="qr-status">Waiting for QR code…</p><img id="qr-image" alt="WhatsApp device linking QR code" hidden><p>WhatsApp → <strong>Linked devices</strong> → <strong>Link a device</strong></p></div>
     <form id="pair-form"><label for="phone">WhatsApp number</label><input id="phone" class="phone-input" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="2348012345678" pattern="[0-9]{8,15}" required aria-describedby="phone-help"><small id="phone-help">Use international format without +, spaces, or dashes.</small><button id="submit" type="submit">Get pairing code</button></form>
     <button id="reconnect-btn" type="button" class="secondary">Start WhatsApp Link</button>
@@ -44,11 +44,20 @@
       try {
         const response = await fetch('/api/status', { cache: 'no-store' });
         const result = await response.json();
-        warning.style.display = result.connected ? 'none' : 'block';
-        reconnectBtn.textContent = result.connected ? 'WhatsApp Linked' : 'Start WhatsApp Link';
-        reconnectBtn.disabled = !!result.connected;
+        if (result.connected) {
+          warning.style.display = 'block';
+          warning.textContent = '✅ ADEZ MD is connected and ready to receive commands.';
+          reconnectBtn.textContent = 'WhatsApp Linked';
+          reconnectBtn.disabled = true;
+          return;
+        }
+        warning.style.display = 'block';
+        warning.textContent = '⚠️ WhatsApp is disconnected. Start the link to reconnect and continue.';
+        reconnectBtn.textContent = 'Start WhatsApp Link';
+        reconnectBtn.disabled = false;
       } catch {
         warning.style.display = 'block';
+        warning.textContent = '⚠️ WhatsApp is disconnected. Start the link to reconnect and continue.';
         reconnectBtn.textContent = 'Start WhatsApp Link';
         reconnectBtn.disabled = false;
       }
