@@ -1,5 +1,7 @@
 require('dotenv').config();
 
+const path = require('node:path');
+const express = require('express');
 const P = require('pino');
 const qrcode = require('qrcode-terminal');
 const {
@@ -12,13 +14,51 @@ const {
 const { config, handleCommand, isCommand } = require('./commands');
 
 const logger = P({ level: process.env.LOG_LEVEL || 'info' });
+const app = express();
+const port = Number(process.env.PORT || 3000);
+const pairingRequests = new Map();
 let reconnectTimer;
+let sock;
+
+app.use(express.json({ limit: '10kb' }));
+app.use(express.static(path.join(__dirname, '..')));
+
+app.get('/health', (_request, response) => {
+  response.json({ ok: true, connected: Boolean(sock?.user), name: config.name });
+});
+
+app.post('/api/pair', async (request, response) => {
+  const phone = String(request.body?.phone || '').replace(/\D/g, '');
+
+  if (!/^\d{8,15}$/.test(phone)) {
+    return response.status(400).json({ error: 'Enter a valid international phone number.' });
+  }
+
+  const previousRequest = pairingRequests.get(phone);
+  if (previousRequest && Date.now() - previousRequest < 60_000) {
+    return response.status(429).json({ error: 'Please wait one minute before requesting another code.' });
+  }
+
+  if (!sock || sock.user) {
+    return response.status(503).json({ error: 'Pairing is temporarily unavailable. Restart the bot if it is already linked.' });
+  }
+
+  pairingRequests.set(phone, Date.now());
+  try {
+    const code = await sock.requestPairingCode(phone);
+    return response.json({ code });
+  } catch (error) {
+    pairingRequests.delete(phone);
+    logger.error({ err: error }, 'Pairing code request failed');
+    return response.status(502).json({ error: 'Unable to create a pairing code. Try again shortly.' });
+  }
+});
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('.auth_info_baileys');
   const { version } = await fetchLatestBaileysVersion();
 
-  const sock = makeWASocket({
+  sock = makeWASocket({
     version,
     auth: state,
     browser: Browsers.ubuntu(config.name),
@@ -36,13 +76,12 @@ async function startBot() {
       qrcode.generate(qr, { small: true });
     }
 
-    if (connection === 'open') {
-      logger.info(`${config.name} is connected`);
-    }
+    if (connection === 'open') logger.info(`${config.name} is connected`);
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      sock = undefined;
 
       if (shouldReconnect) {
         logger.warn({ statusCode }, 'Connection closed; reconnecting');
@@ -59,39 +98,32 @@ async function startBot() {
 
     for (const message of messages) {
       if (!message.message || message.key.fromMe) continue;
-
       const remoteJid = message.key.remoteJid;
       if (!remoteJid || remoteJid === 'status@broadcast') continue;
 
       const text = getMessageText(message);
       if (!text || !isCommand(text)) continue;
-
-      const response = handleCommand(text);
-      if (response) {
-        await sock.sendMessage(remoteJid, { text: response }, { quoted: message });
-      }
+      const reply = handleCommand(text);
+      if (reply) await sock.sendMessage(remoteJid, { text: reply }, { quoted: message });
     }
   });
 }
 
 function getMessageText(message) {
   const content = message.message;
-  return content.conversation ||
-    content.extendedTextMessage?.text ||
-    content.imageMessage?.caption ||
-    content.videoMessage?.caption ||
-    '';
+  return content.conversation || content.extendedTextMessage?.text ||
+    content.imageMessage?.caption || content.videoMessage?.caption || '';
 }
 
-process.on('SIGINT', () => {
-  clearTimeout(reconnectTimer);
-  process.exit(0);
-});
+const server = app.listen(port, () => logger.info(`Pairing page available at http://localhost:${port}/pair.html`));
 
-process.on('SIGTERM', () => {
+function shutdown() {
   clearTimeout(reconnectTimer);
-  process.exit(0);
-});
+  server.close(() => process.exit(0));
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 startBot().catch((error) => {
   logger.error({ err: error }, 'Failed to start bot');

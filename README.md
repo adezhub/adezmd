@@ -1,23 +1,18 @@
 # ADEZ MD WhatsApp Bot
 
-A starter WhatsApp bot for ADEZ MD, built with Node.js and Baileys. It supports QR-code login, reconnects automatically, and includes useful command handlers that can be extended with ADEZ MD services.
+A WhatsApp bot for ADEZ MD using Node.js, Baileys, and a browser-based pairing page.
 
 ## Features
 
-- QR-code authentication in the terminal
-- Persistent WhatsApp session in `.auth_info_baileys/`
-- Commands: `help`, `ping`, `menu`, and `about`
-- Case-insensitive commands with `/`, `!`, or no prefix
-- Group-chat friendly behavior: responds only when mentioned or when a command is sent
-- Environment-based configuration
-- Graceful shutdown and automatic reconnects
+- WhatsApp pairing-code page at `/pair.html`
+- QR-code fallback in the terminal
+- Persistent authentication in `.auth_info_baileys/`
+- Automatic reconnects
+- `help`, `ping`, `menu`, and `about` commands
+- JSON health endpoint at `/health`
+- Basic pairing-code rate limiting
 
-## Requirements
-
-- Node.js 20 or newer
-- A WhatsApp account to pair with the bot
-
-## Setup
+## Run locally
 
 ```bash
 npm install
@@ -25,11 +20,7 @@ cp .env.example .env
 npm start
 ```
 
-Scan the QR code from WhatsApp on your phone:
-
-**WhatsApp → Settings → Linked devices → Link a device**
-
-The login session is stored locally and should not be committed or shared.
+Open `http://localhost:3000/pair.html`, enter the WhatsApp number in international format without `+`, and follow the instructions. The terminal QR code can also be used when the pairing page is unavailable.
 
 ## Configuration
 
@@ -39,6 +30,7 @@ The login session is stored locally and should not be committed or shared.
 | `BOT_PREFIX` | `/` | Preferred command prefix |
 | `OWNER_NAME` | `ADEZ MD Team` | Bot owner/team label |
 | `LOG_LEVEL` | `info` | Pino log level |
+| `PORT` | `3000` | HTTP port for the pairing page |
 
 ## Commands
 
@@ -47,8 +39,6 @@ The login session is stored locally and should not be committed or shared.
 - `/menu` — show the ADEZ MD menu
 - `/about` — show bot information
 
-To add business workflows, extend `src/commands.js` and keep secrets in environment variables rather than source code.
+## Deployment notes
 
-## Important
-
-Use this bot only with the consent of the WhatsApp account owner and in accordance with WhatsApp's terms and applicable privacy laws. Do not use it to provide emergency or diagnostic medical advice. For emergencies, users should contact local emergency services.
+Use HTTPS when exposing the pairing page publicly, restrict access where possible, and never commit `.env` or `.auth_info_baileys/`. Pairing codes grant access to the WhatsApp account, so do not share them or log them. Use the bot only with account-owner consent and in accordance with WhatsApp's terms and applicable privacy laws. The bot does not provide emergency or diagnostic medical advice.
